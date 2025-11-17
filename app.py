@@ -3,8 +3,6 @@ from flask_cors import CORS
 import os
 import requests
 import time
-from datetime import datetime
-import pytz
 
 app = Flask(__name__)
 CORS(app)
@@ -43,8 +41,9 @@ def fetch_reactions(channel_id, oldest_ts, latest_ts, user_id):
             "channel": channel_id,
             "oldest": str(oldest_ts),
             "latest": str(latest_ts),
-            "limit": 200,
+            "limit": 200
         }
+
         if cursor:
             params["cursor"] = cursor
 
@@ -95,23 +94,24 @@ def count_reactions_route():
     if start_ts is None:
         return jsonify({"error": "Missing timestamp"}), 400
 
-    # FRONTEND NOW SENDS UNIX TIMESTAMP → accept directly
+    # FRONTEND sends UNIX timestamp already (UTC)
     try:
         start_ts = int(start_ts)
-    except Exception:
+    except:
         return jsonify({"error": "Invalid timestamp format"}), 400
+
+    # Safety check: timestamp cannot be in the future
+    now = int(time.time())
+    if start_ts > now:
+        return jsonify({"error": "Timestamp cannot be in the future"}), 400
 
     user_id = USER_IDS[user]
 
-    # latest = now
-    end_ts = int(time.time())
-
-    results = fetch_reactions(CHANNEL_ID, start_ts, end_ts, user_id)
+    results = fetch_reactions(CHANNEL_ID, start_ts, now, user_id)
     return jsonify(results)
 
 
-# IMPORTANT: this stays, but Render WILL NOT execute it.
-# Only Gunicorn will run the app, not this block.
+# Render will not run this block. Only for local debugging.
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
     app.run(host="0.0.0.0", port=port)
