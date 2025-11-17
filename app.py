@@ -1,13 +1,15 @@
 from flask import Flask, request, jsonify
 import requests
 import time
+from datetime import datetime
+import pytz
+import os
 
 app = Flask(__name__)
 
-import os
+# ---- Slack Config ----
 SLACK_TOKEN = os.getenv("SLACK_TOKEN")
 CHANNEL_ID = "C04H3PK3KEJ"
-
 HEADERS = {"Authorization": f"Bearer {SLACK_TOKEN}"}
 
 TARGET_REACTIONS_LIST = [
@@ -16,6 +18,7 @@ TARGET_REACTIONS_LIST = [
     "x",
     "male-detective::skin-tone-2",
 ]
+
 
 def fetch_reactions(oldest, latest, target_user):
     counts = {emoji: 0 for emoji in TARGET_REACTIONS_LIST}
@@ -61,19 +64,35 @@ def fetch_reactions(oldest, latest, target_user):
 def count():
     body = request.json
     user = body["user"]
-    start_ts = body["start_ts"]
+    local_ts = body["start_ts"]
+    timezone_name = body["timezone"]  # NEW — user’s timezone
+
+    # ---- Convert provided timestamp from user's timezone → UTC ----
+    try:
+        tz = pytz.timezone(timezone_name)
+    except Exception:
+        return jsonify({"error": f"Invalid timezone: {timezone_name}"}), 400
+
+    dt_local = datetime.fromtimestamp(local_ts, tz)
+    dt_utc = dt_local.astimezone(pytz.utc)
+    start_ts_utc = int(dt_utc.timestamp())
+
+    # ---- Slack uses UTC always ----
     end_ts = int(time.time())
 
-    total, counts = fetch_reactions(start_ts, end_ts, user)
+    total, counts = fetch_reactions(start_ts_utc, end_ts, user)
 
-    return jsonify(
-        {
-            "messages_scanned": total,
-            "reaction_counts": counts,
-        }
-    )
+    return jsonify({
+        "messages_scanned": total,
+        "reaction_counts": counts,
+        "converted_start_timestamp_utc": start_ts_utc
+    })
 
 
 @app.route("/")
 def home():
-    return "Slack Reaction Counter API Running"
+    return "Slack Reaction Counter API is running"
+
+
+if __name__ == "__main__":
+    app.run()
