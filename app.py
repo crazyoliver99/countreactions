@@ -43,7 +43,7 @@ def fetch_reactions(channel_id, oldest_ts, latest_ts, user_id):
             "channel": channel_id,
             "oldest": str(oldest_ts),
             "latest": str(latest_ts),
-            "limit": 200
+            "limit": 200,
         }
         if cursor:
             params["cursor"] = cursor
@@ -83,34 +83,35 @@ def home():
 
 
 @app.route("/count", methods=["POST"])
-def count_reactions():
+def count_reactions_route():
     data = request.get_json()
 
     user = data.get("user")
-    local_timestamp_str = data.get("start_ts")
+    start_ts = data.get("start_ts")
 
-    if not user or not local_timestamp_str:
-        return jsonify({"error": "Missing input fields"}), 400
-
-    # Convert user to Slack ID
-    user_id = USER_IDS.get(user)
-    if not user_id:
+    if user not in USER_IDS:
         return jsonify({"error": "Unknown user"}), 400
 
-    # Convert user local time to UTC timestamp
+    if start_ts is None:
+        return jsonify({"error": "Missing timestamp"}), 400
+
+    # FRONTEND NOW SENDS UNIX TIMESTAMP → accept directly
     try:
-        dt_local = datetime.fromisoformat(local_timestamp_str)
-        utc_dt = dt_local.astimezone(pytz.UTC)
-        start_ts = int(utc_dt.timestamp())
-    except:
-        return jsonify({"error": "Invalid datetime"}), 400
+        start_ts = int(start_ts)
+    except Exception:
+        return jsonify({"error": "Invalid timestamp format"}), 400
 
-    # Run Slack scan
+    user_id = USER_IDS[user]
+
+    # latest = now
     end_ts = int(time.time())
-    results = fetch_reactions(CHANNEL_ID, start_ts, end_ts, user_id)
 
+    results = fetch_reactions(CHANNEL_ID, start_ts, end_ts, user_id)
     return jsonify(results)
 
 
+# IMPORTANT: this stays, but Render WILL NOT execute it.
+# Only Gunicorn will run the app, not this block.
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=5000)
+    port = int(os.environ.get("PORT", 5000))
+    app.run(host="0.0.0.0", port=port)
