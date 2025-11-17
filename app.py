@@ -22,7 +22,6 @@ USER_IDS = {
     "Luciana": "U05EVPH8FFU",
 }
 
-# These keys correspond to your output labels on frontend
 TARGET_REACTIONS_LIST = [
     "white_check_mark",
     "baby::skin-tone-2",
@@ -36,7 +35,6 @@ def fetch_reactions(channel_id, oldest_ts, latest_ts, user_id):
     cursor = None
     total_msgs = 0
 
-    # Initialize counters
     reaction_counts = {emoji: 0 for emoji in TARGET_REACTIONS_LIST}
 
     while True:
@@ -54,7 +52,7 @@ def fetch_reactions(channel_id, oldest_ts, latest_ts, user_id):
             "https://slack.com/api/conversations.history",
             headers=headers,
             params=params,
-            timeout=30
+            timeout=30,
         )
 
         data = resp.json()
@@ -67,25 +65,18 @@ def fetch_reactions(channel_id, oldest_ts, latest_ts, user_id):
                 name = r.get("name", "")
                 users = r.get("users", [])
 
-                if user_id not in users:
+                # If ALL → count everyone. If specific user → only that user.
+                if user_id != "ALL" and user_id not in users:
                     continue
 
-                # Normalize for matching
                 n = name.lower()
 
-                # Checkmark (Slack only uses "white_check_mark")
                 if "white_check_mark" in n:
                     reaction_counts["white_check_mark"] += 1
-
-                # Detective (match ANY detective variation)
                 elif "detective" in n:
                     reaction_counts["male-detective::skin-tone-2"] += 1
-
-                # Baby (match ANY baby / baby::skin-tone-X)
                 elif "baby" in n:
                     reaction_counts["baby::skin-tone-2"] += 1
-
-                # X reaction (should match exactly)
                 elif n == "x":
                     reaction_counts["x"] += 1
 
@@ -111,26 +102,26 @@ def count_reactions_route():
     user = data.get("user")
     start_ts = data.get("start_ts")
 
-    if user not in USER_IDS:
+    if user != "ALL" and user not in USER_IDS:
         return jsonify({"error": "Unknown user"}), 400
 
     if start_ts is None:
         return jsonify({"error": "Missing timestamp"}), 400
 
-    # Frontend sends correct UNIX timestamp → accept directly
     try:
         start_ts = int(start_ts)
     except:
         return jsonify({"error": "Invalid timestamp format"}), 400
 
-    user_id = USER_IDS[user]
+    # If ALL → special flag
+    user_id = "ALL" if user == "ALL" else USER_IDS[user]
+
     end_ts = int(time.time())
 
     results = fetch_reactions(CHANNEL_ID, start_ts, end_ts, user_id)
     return jsonify(results)
 
 
-# Render ignores this block, but it's safe for local testing.
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
     app.run(host="0.0.0.0", port=port)
