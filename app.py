@@ -1,78 +1,116 @@
 from flask import Flask, request, jsonify
+from flask_cors import CORS
+import os
 import requests
 import time
 from datetime import datetime
-from pytz import timezone, utc
-from flask_cors import CORS
+import pytz
 
 app = Flask(__name__)
-CORS(app)  # allow frontend to access backend
+CORS(app)
 
-SLACK_TOKEN = "YOUR_SLACK_BOT_TOKEN"
-CHANNEL_ID = "YOUR_CHANNEL_ID"
+# === Slack Config ===
+SLACK_TOKEN = os.environ.get("SLACK_TOKEN")
+CHANNEL_ID = "C04H3PK3KEJ"
 
-def fetch_reactions(channel_id, start_ts, end_ts, target_user):
-    url = "https://slack.com/api/conversations.history"
+if not SLACK_TOKEN:
+    raise ValueError("SLACK_TOKEN is not set in Render environment variables")
+
+USER_IDS = {
+    "Harilaos": "U07QSV6C8BU",
+    "Ahmed": "U07U12AQD62",
+    "Abi": "U07UYDUQ96K",
+    "Luciana": "U05EVPH8FFU",
+}
+
+TARGET_REACTIONS_LIST = [
+    "white_check_mark",
+    "baby::skin-tone-2",
+    "x",
+    "male-detective::skin-tone-2",
+]
+
+
+def fetch_reactions(channel_id, oldest_ts, latest_ts, user_id):
     headers = {"Authorization": f"Bearer {SLACK_TOKEN}"}
-    params = {
-        "channel": channel_id,
-        "oldest": start_ts,
-        "latest": end_ts,
-        "inclusive": True
-    }
+    cursor = None
+    total_msgs = 0
 
-    all_reactions = {}
-    user_post_found = False
+    reaction_counts = {emoji: 0 for emoji in TARGET_REACTIONS_LIST}
 
     while True:
-        response = requests.get(url, headers=headers, params=params).json()
+        params = {
+            "channel": channel_id,
+            "oldest": str(oldest_ts),
+            "latest": str(latest_ts),
+            "limit": 200
+        }
+        if cursor:
+            params["cursor"] = cursor
 
-        if not response.get("ok"):
-            return {"error": response.get("error", "Unknown error")}
+        resp = requests.get(
+            "https://slack.com/api/conversations.history",
+            headers=headers,
+            params=params,
+            timeout=30
+        )
 
-        messages = response.get("messages", [])
+        data = resp.json()
+        messages = data.get("messages", [])
+        total_msgs += len(messages)
 
         for msg in messages:
-            if msg.get("user") == target_user:
-                user_post_found = True
+            reactions = msg.get("reactions", [])
+            for r in reactions:
+                name = r.get("name")
+                users = r.get("users", [])
+                if name in reaction_counts and user_id in users:
+                    reaction_counts[name] += 1
 
-            if "reactions" in msg:
-                for reaction in msg["reactions"]:
-                    name = reaction["name"]
-                    count = reaction["count"]
-                    all_reactions[name] = all_reactions.get(name, 0) + count
-
-        if not response.get("has_more"):
-            break
-
-        params["cursor"] = response.get("response_metadata", {}).get("next_cursor")
-        if not params["cursor"]:
+        cursor = data.get("response_metadata", {}).get("next_cursor")
+        if not cursor:
             break
 
     return {
-        "user_post_found": user_post_found,
-        "reactions": all_reactions,
-        "total_reactions": sum(all_reactions.values())
+        "total_messages": total_msgs,
+        "reaction_counts": reaction_counts,
     }
+
 
 @app.route("/", methods=["GET"])
 def home():
     return "Slack Reaction Counter API is running"
 
-# NEW WORKING POST ENDPOINT
+
 @app.route("/count", methods=["POST"])
 def count_reactions():
     data = request.get_json()
+
     user = data.get("user")
-    start_ts = data.get("start_ts")
+    local_timestamp_str = data.get("start_ts")
 
-    if not user or not start_ts:
-        return jsonify({"error": "Missing user or timestamp"}), 400
+    if not user or not local_timestamp_str:
+        return jsonify({"error": "Missing input fields"}), 400
 
+    # Convert user to Slack ID
+    user_id = USER_IDS.get(user)
+    if not user_id:
+        return jsonify({"error": "Unknown user"}), 400
+
+    # Convert user local time to UTC timestamp
+    try:
+        dt_local = datetime.fromisoformat(local_timestamp_str)
+        utc_dt = dt_local.astimezone(pytz.UTC)
+        start_ts = int(utc_dt.timestamp())
+    except:
+        return jsonify({"error": "Invalid datetime"}), 400
+
+    # Run Slack scan
     end_ts = int(time.time())
-    result = fetch_reactions(CHANNEL_ID, start_ts, end_ts, user)
+    results = fetch_reactions(CHANNEL_ID, start_ts, end_ts, user_id)
 
-    return jsonify(result)
+    return jsonify(results)
+
 
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=10000)
+    app.run(host="0.0.0.0", port=5000)
