@@ -3,6 +3,7 @@ from flask_cors import CORS
 import os
 import requests
 import time
+from datetime import datetime
 
 app = Flask(__name__)
 CORS(app)
@@ -21,6 +22,7 @@ USER_IDS = {
     "Luciana": "U05EVPH8FFU",
 }
 
+# These keys correspond to your output labels on frontend
 TARGET_REACTIONS_LIST = [
     "white_check_mark",
     "baby::skin-tone-2",
@@ -34,6 +36,7 @@ def fetch_reactions(channel_id, oldest_ts, latest_ts, user_id):
     cursor = None
     total_msgs = 0
 
+    # Initialize counters
     reaction_counts = {emoji: 0 for emoji in TARGET_REACTIONS_LIST}
 
     while True:
@@ -41,7 +44,7 @@ def fetch_reactions(channel_id, oldest_ts, latest_ts, user_id):
             "channel": channel_id,
             "oldest": str(oldest_ts),
             "latest": str(latest_ts),
-            "limit": 200
+            "limit": 200,
         }
 
         if cursor:
@@ -61,10 +64,30 @@ def fetch_reactions(channel_id, oldest_ts, latest_ts, user_id):
         for msg in messages:
             reactions = msg.get("reactions", [])
             for r in reactions:
-                name = r.get("name")
+                name = r.get("name", "")
                 users = r.get("users", [])
-                if name in reaction_counts and user_id in users:
-                    reaction_counts[name] += 1
+
+                if user_id not in users:
+                    continue
+
+                # Normalize for matching
+                n = name.lower()
+
+                # Checkmark (Slack only uses "white_check_mark")
+                if "white_check_mark" in n:
+                    reaction_counts["white_check_mark"] += 1
+
+                # Detective (match ANY detective variation)
+                elif "detective" in n:
+                    reaction_counts["male-detective::skin-tone-2"] += 1
+
+                # Baby (match ANY baby / baby::skin-tone-X)
+                elif "baby" in n:
+                    reaction_counts["baby::skin-tone-2"] += 1
+
+                # X reaction (should match exactly)
+                elif n == "x":
+                    reaction_counts["x"] += 1
 
         cursor = data.get("response_metadata", {}).get("next_cursor")
         if not cursor:
@@ -94,24 +117,20 @@ def count_reactions_route():
     if start_ts is None:
         return jsonify({"error": "Missing timestamp"}), 400
 
-    # FRONTEND sends UNIX timestamp already (UTC)
+    # Frontend sends correct UNIX timestamp → accept directly
     try:
         start_ts = int(start_ts)
     except:
         return jsonify({"error": "Invalid timestamp format"}), 400
 
-    # Safety check: timestamp cannot be in the future
-    now = int(time.time())
-    if start_ts > now:
-        return jsonify({"error": "Timestamp cannot be in the future"}), 400
-
     user_id = USER_IDS[user]
+    end_ts = int(time.time())
 
-    results = fetch_reactions(CHANNEL_ID, start_ts, now, user_id)
+    results = fetch_reactions(CHANNEL_ID, start_ts, end_ts, user_id)
     return jsonify(results)
 
 
-# Render will not run this block. Only for local debugging.
+# Render ignores this block, but it's safe for local testing.
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
     app.run(host="0.0.0.0", port=port)
