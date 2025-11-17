@@ -88,7 +88,7 @@ def count():
         "converted_start_timestamp_utc": start_ts_utc
     })
 
-
+    # ---- Convert provided timestamp from user's timezone → UTC ----
 @app.route("/")
 def home():
     return "Slack Reaction Counter API is running"
