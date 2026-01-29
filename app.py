@@ -4,6 +4,7 @@ import os
 import requests
 import time
 from datetime import datetime, timezone
+from collections import Counter
 
 app = Flask(__name__)
 CORS(app)
@@ -38,6 +39,9 @@ def fetch_reactions(channel_id, oldest_ts, latest_ts, user_id):
 
     reaction_counts = {emoji: 0 for emoji in TARGET_REACTIONS_LIST}
     
+    # Track ALL emoji names we see
+    all_emoji_names = Counter()
+    
     # DIAGNOSTIC LOGGING
     print("=" * 60)
     print(f"FETCH REACTIONS CALLED")
@@ -60,7 +64,6 @@ def fetch_reactions(channel_id, oldest_ts, latest_ts, user_id):
             params["cursor"] = cursor
 
         print(f"\n[Iteration {iteration}] Making API request...")
-        print(f"  Cursor: {cursor if cursor else 'None (first request)'}")
 
         resp = requests.get(
             "https://slack.com/api/conversations.history",
@@ -71,7 +74,6 @@ def fetch_reactions(channel_id, oldest_ts, latest_ts, user_id):
 
         data = resp.json()
         
-        print(f"  API Response OK: {data.get('ok')}")
         if not data.get("ok"):
             print(f"  ERROR: {data.get('error')}")
             break
@@ -80,16 +82,17 @@ def fetch_reactions(channel_id, oldest_ts, latest_ts, user_id):
         total_msgs += len(messages)
         
         print(f"  Messages received: {len(messages)}")
-        print(f"  Total messages so far: {total_msgs}")
         
-        # Count reactions in these messages
-        reactions_in_batch = 0
+        # Track ALL emoji names we encounter
         for msg in messages:
             reactions = msg.get("reactions", [])
             for r in reactions:
                 name = r.get("name", "")
                 users = r.get("users", [])
-
+                
+                # Count ALL emoji types (for diagnostic purposes)
+                all_emoji_names[name] += len(users) if user_id == "ALL" else (1 if user_id in users else 0)
+                
                 # If ALL → count everyone. If specific user → only that user.
                 if user_id != "ALL" and user_id not in users:
                     continue
@@ -98,50 +101,35 @@ def fetch_reactions(channel_id, oldest_ts, latest_ts, user_id):
 
                 if "white_check_mark" in n:
                     reaction_counts["white_check_mark"] += 1
-                    reactions_in_batch += 1
                 elif "detective" in n:
                     reaction_counts["male-detective::skin-tone-2"] += 1
-                    reactions_in_batch += 1
                 elif "baby" in n:
                     reaction_counts["baby::skin-tone-2"] += 1
-                    reactions_in_batch += 1
                 elif n == "x":
                     reaction_counts["x"] += 1
-                    reactions_in_batch += 1
-        
-        print(f"  Reactions found in this batch: {reactions_in_batch}")
 
-        # Check for next cursor
-        next_cursor = data.get("response_metadata", {}).get("next_cursor")
-        has_more = data.get("has_more", False)
-        
-        print(f"  has_more: {has_more}")
-        print(f"  next_cursor exists: {bool(next_cursor)}")
-        
-        if next_cursor:
-            print(f"  Next cursor: {next_cursor[:50]}...")
-        
-        cursor = next_cursor
+        cursor = data.get("response_metadata", {}).get("next_cursor")
         if not cursor:
-            print(f"\n[END] No more pages. Stopping pagination.")
             break
         
-        # Safety limit
         if iteration >= 50:
-            print(f"\n[SAFETY] Hit iteration limit of 50. Stopping.")
+            print(f"\n[SAFETY] Hit iteration limit. Stopping.")
             break
 
     print("\n" + "=" * 60)
     print(f"FINAL RESULTS:")
-    print(f"Total iterations: {iteration}")
     print(f"Total messages: {total_msgs}")
     print(f"Reaction counts: {reaction_counts}")
+    print(f"\n🔍 ALL EMOJI NAMES FOUND (with counts):")
+    for emoji_name, count in all_emoji_names.most_common(20):
+        print(f"  '{emoji_name}': {count}")
     print("=" * 60)
 
     return {
         "total_messages": total_msgs,
         "reaction_counts": reaction_counts,
-        "iterations": iteration,  # Extra debug info
+        "iterations": iteration,
+        "debug_all_emojis": dict(all_emoji_names.most_common(20)),  # Return for debugging
     }
 
 
