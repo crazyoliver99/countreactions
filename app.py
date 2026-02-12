@@ -28,6 +28,8 @@ TARGET_REACTIONS_LIST = [
     "baby::skin-tone-2",
     "x",
     "male-detective::skin-tone-2",
+    "hourglass",
+    "hourglass_flowing_sand",
 ]
 
 
@@ -107,6 +109,10 @@ def fetch_reactions(channel_id, oldest_ts, latest_ts, user_id):
                     reaction_counts["baby::skin-tone-2"] += 1
                 elif n == "x":
                     reaction_counts["x"] += 1
+                elif n == "hourglass":
+                    reaction_counts["hourglass"] += 1
+                elif n == "hourglass_flowing_sand":
+                    reaction_counts["hourglass_flowing_sand"] += 1
 
         cursor = data.get("response_metadata", {}).get("next_cursor")
         if not cursor:
